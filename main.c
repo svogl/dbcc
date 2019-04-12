@@ -82,7 +82,7 @@ static int dbc2cWrapper(dbc_t *dbc, const char *dbc_file, const char *file_only,
 	assert(dbc);
 	assert(dbc_file);
 	assert(file_only);
-	char *cname = replace_file_type(dbc_file,  "js");
+	char *cname = replace_file_type(dbc_file,  "c");
 	char *hname = replace_file_type(dbc_file,  "h");
 	char *fname = replace_file_type(file_only, "h");
 	FILE *c = fopen_or_die(cname, "wb");
@@ -104,14 +104,18 @@ static int dbc2jsWrapper(dbc_t *dbc, const char *dbc_file, const char *file_only
 	assert(file_only);
 	char *cname = replace_file_type(dbc_file,  "c");
 	char *hname = replace_file_type(dbc_file,  "h");
+	char *jname = replace_file_type(dbc_file,  "js");
 	char *fname = replace_file_type(file_only, "h");
 	FILE *c = fopen_or_die(cname, "wb");
 	FILE *h = fopen_or_die(hname, "wb");
-	const int r = dbc2js(dbc, c, h, fname, jsopts);
+	FILE *js = fopen_or_die(jname, "wb");
+	const int r = dbc2js(dbc, c, h, js, fname, jsopts);
 	fclose(c);
 	fclose(h);
+	fclose(js);
 	free(cname);
 	free(hname);
+	free(jname);
 	free(fname);
 	return r;
 }

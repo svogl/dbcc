@@ -258,20 +258,20 @@ static int signal2print_json(signal_t *sig, unsigned id, const char *msg_name, F
 	if (sig->is_floating) {
 		fprintf(o, "\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name, msg_name, sig->name);
 		// return fprintf(o, "\"XXXX_%s\":\"%s.%s\" ", sig->name, msg_name, sig->name);
-			return fprintf(o, "\tfprintf(output, \"\\\"%s\\\":%%g%s\", f);\n", sig->name, comma );
+			return fprintf(o, "\tr += snprintf(buf+r, bufSize-r,  \"\\\"%s\\\":%%g%s\", f);\n", sig->name, comma );
 	} else {
 		if (sig->bit_length <= 8) {
 			fprintf(o, "\tdecode_can_0x%3x_%s(o, &i);\n", id, sig->name, msg_name, sig->name);
-			return fprintf(o, "\tfprintf(output, \"\\\"%s\\\":%%d%s\", i );\n", sig->name, comma );
+			return fprintf(o, "\tr += snprintf(buf+r, bufSize-r, \"\\\"%s\\\":%%d%s\", i );\n", sig->name, comma );
 	}	else if (sig->bit_length<= 16) {
 			fprintf(o, "\tdecode_can_0x%3x_%s(o, &s);\n", id, sig->name, msg_name, sig->name);
-			return fprintf(o, "\tfprintf(output, \"\\\"%s\\\":%%d%s\", s );\n", sig->name, comma );
+			return fprintf(o, "\tr += snprintf(buf+r, bufSize-r,  \"\\\"%s\\\":%%d%s\", s );\n", sig->name, comma );
 	}	else if (sig->bit_length<= 32) {
 			fprintf(o, "\tdecode_can_0x%3x_%s(o, &l);\n", id, sig->name, msg_name, sig->name);
-			return fprintf(o, "\tfprintf(output, \"\\\"%s\\\":%%d%s\", l);\n", sig->name, comma );
+			return fprintf(o, "\tr += snprintf(buf+r, bufSize-r, \"\\\"%s\\\":%%d%s\", l);\n", sig->name, comma );
 		} else {
 			fprintf(o, "\tdecode_can_0x%3x_%s(o, &ll);\n", id, sig->name, msg_name, sig->name);
-			return fprintf(o, "\tfprintf(output, \"\\\"%s\\\":%%lld%s\", ll);\n", sig->name, comma );
+			return fprintf(o, "\tr += snprintf(buf+r, bufSize-r, \"\\\"%s\\\":%%lld%s\", ll);\n", sig->name, comma );
 		}
 	}
 	/* ======= NEVER REACHED ======== */
@@ -771,26 +771,26 @@ static int msg_print_json(can_msg_t *msg, FILE *c, const char *name, const char 
 	assert(name);
 	assert(god);
 	assert(copts);
-	fprintf(c, "int print_%s(const can_obj_%s_t *o, FILE *output) {\n", name, god);
+	fprintf(c, "int print_%s(const can_obj_%s_t *o, char *buf, int bufSize) {\n", name, god);
 	if (copts->generate_asserts) {
 		fputs("\tassert(o);\n", c);
-		fputs("\tassert(output);\n", c);
+		fputs("\tassert(buf);\n", c);
 		/* you may note the UNUSED macro may be generated, we should
 		 * still assert we are passed the correct things */
 	}
 	if (msg->signal_count)
 		fprintf(c, "\tint r = 0;\n"); //fprintf(c, "\tdouble scaled;\n\tint r = 0;\n");
 	else
-		fprintf(c, "\tUNUSED(o);\n\tUNUSED(output);\n");
+		fprintf(c, "\tUNUSED(o);\n\tUNUSED(buf);\n");
 
 	fprintf(c, "\tdouble f;uint8_t i;uint16_t s;uint32_t l;uint64_t ll;\n");
-	fprintf(c, "\tr += fprintf(output, \"{ \");\n");
+	fprintf(c, "\tr += snprintf(buf, bufSize, \"{ \");\n");
 
 	for (size_t i = 0; i < msg->signal_count; i++) {
 		if (signal2print_json(msg->sigs[i], msg->id, name, c, (i < msg->signal_count -1) ) < 0)
 			return -1;
 	}
-	fprintf(c, "\tfprintf(output, \" }\\n\");\n");
+	fprintf(c, "\tr += snprintf(buf+r, bufSize-r, \" }\\n\");\n");
 	if (msg->signal_count)
 		fprintf(c, "\treturn r;\n}\n\n");
 	else
@@ -962,14 +962,14 @@ static int switch_function_print(FILE *c, dbc_t *dbc, bool prototype, const char
 	assert(dbc);
 	assert(god);
 	assert(copts);
-	fprintf(c, "int print_message(const can_obj_%s_t *o, const unsigned long id, FILE *output)", god);
+	fprintf(c, "int print_message(const can_obj_%s_t *o, const unsigned long id, char* buf, int bufSize )", god);
 	if (prototype)
 		return fprintf(c, ";\n");
 	fprintf(c, " {\n");
 	if (copts->generate_asserts) {
 		fprintf(c, "\tassert(o);\n");
 		fprintf(c, "\tassert(id < (1ul << 29)); /* 29-bit CAN ID is largest possible */\n");
-		fprintf(c, "\tassert(output);\n");
+		fprintf(c, "\tassert(buf);\n");
 	}
 
 	fprintf(c, "\tswitch (id) {\n");
@@ -977,9 +977,9 @@ static int switch_function_print(FILE *c, dbc_t *dbc, bool prototype, const char
 		can_msg_t *msg = dbc->messages[i];
 		char name[MAX_NAME_LENGTH] = {0};
 		make_name(name, MAX_NAME_LENGTH, msg->name, msg->id);
-		fprintf(c, "\tcase 0x%03lx: return print_%s(o, output);\n", msg->id, name);
+		fprintf(c, "\tcase 0x%03lx: return print_%s(o, buf, bufSize);\n", msg->id, name);
 	}
-	fprintf(c, "\tdefault: fprintf(output, \"nop: %%03x\\n\", id); break; \n\t}\n");
+	fprintf(c, "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return -1; break; \n\t}\n");
 	return fprintf(c, "\treturn -1; \n}\n\n");
 }
 

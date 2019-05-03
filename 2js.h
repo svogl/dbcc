@@ -14,7 +14,7 @@ typedef struct {
 	bool generate_asserts;
 } dbc2js_options_t;
 
-int dbc2js(dbc_t *dbc, FILE *c, FILE *h, FILE *js,  const char *name, dbc2js_options_t *copts);
+int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *copts);
 
 #ifdef __cplusplus
 }

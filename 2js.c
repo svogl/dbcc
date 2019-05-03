@@ -249,8 +249,8 @@ static int signal2print_json(signal_t *sig, unsigned id, const char *msg_name, F
 	if (! add_comma) {
 		comma[0] = ' ';
 	}
-	printf("sig %s %d %d scal %g ofs %g\n", sig->name, 
-		sig->is_floating, sig->bit_length, sig->scaling, sig->offset);
+	// printf("sig %s %d %d scal %g ofs %g\n", sig->name, 
+	// 	sig->is_floating, sig->bit_length, sig->scaling, sig->offset);
 
 	if (sig->scaling != 1.0 || sig->offset != 0.0)
 		sig->is_floating = true;
@@ -285,6 +285,59 @@ static int signal2print_json(signal_t *sig, unsigned id, const char *msg_name, F
 			sig->name, sig->name);
 	/*fprintf(o, "\tif (r < 0)\n\t\treturn r;");*/
 }
+
+static int signal2print_delta_json(signal_t *sig, unsigned id,
+                                   const char *msg_name, FILE *o,
+                                   int add_comma) {
+  char comma[] = ",";
+  if (!add_comma) {
+    comma[0] = ' ';
+  }
+
+  if (sig->scaling != 1.0 || sig->offset != 0.0) sig->is_floating = true;
+
+	fprintf(o, "\tif ( o->%s.%s != old->%s.%s)) {\n", 
+					sig->name, msg_name, 
+					sig->name, msg_name);
+
+  if (sig->is_floating) {
+    fprintf(o, "\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name, msg_name,
+            sig->name);
+    // return fprintf(o, "\"XXXX_%s\":\"%s.%s\" ", sig->name, msg_name,
+    // sig->name);
+
+    return fprintf(
+        o, "\tr += snprintf(buf+r, bufSize-r,  \"\\\"%s\\\":%%g%s\", f);\n",
+        sig->name, comma);
+  } else {
+    if (sig->bit_length <= 8) {
+      fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &i);\n", id, sig->name, msg_name,
+              sig->name);
+      return fprintf(
+          o, "\t\tr += snprintf(buf+r, bufSize-r, \"\\\"%s\\\":%%d%s\", i );\n\t}\n",
+          sig->name, comma);
+    } else if (sig->bit_length <= 16) {
+      fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &s);\n", id, sig->name, msg_name,
+              sig->name);
+      return fprintf(
+          o, "\t\tr += snprintf(buf+r, bufSize-r,  \"\\\"%s\\\":%%d%s\", s );\n\t}\n",
+          sig->name, comma);
+    } else if (sig->bit_length <= 32) {
+      fprintf(o, "\tdecode_can_0x%3x_%s(o, &l);\n", id, sig->name, msg_name,
+              sig->name);
+      return fprintf(
+          o, "\t\tr += snprintf(buf+r, bufSize-r, \"\\\"%s\\\":%%d%s\", l);\n\t}\n",
+          sig->name, comma);
+    } else {
+      fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &ll);\n", id, sig->name, msg_name,
+              sig->name);
+      return fprintf(
+          o, "\t\tr += snprintf(buf+r, bufSize-r, \"\\\"%s\\\":%%lld%s\", ll);\n\t}\n",
+          sig->name, comma);
+    }
+  }
+}
+
 
 static int signal2print(signal_t *sig, unsigned id, const char *msg_name, FILE *o)
 {
@@ -798,6 +851,51 @@ static int msg_print_json(can_msg_t *msg, FILE *c, const char *name, const char 
 	return 0;
 }
 
+/** print a message formatted as a JSON object
+ *
+ */
+static int msg_print_delta_json(can_msg_t *msg, FILE *c, const char *name,
+                                const char *god, dbc2js_options_t *copts) {
+  assert(msg);
+  assert(c);
+  assert(name);
+  assert(god);
+  assert(copts);
+  fprintf(
+      c,
+      "int print_delta_%s(const can_obj_%s_t *o, const can_obj_%s_t *old, char *buf, int bufSize) {\n",
+      name, god, god);
+  if (copts->generate_asserts) {
+    fputs("\tassert(o);\n", c);
+    fputs("\tassert(old);\n", c);
+    fputs("\tassert(buf);\n", c);
+    /* you may note the UNUSED macro may be generated, we should
+     * still assert we are passed the correct things */
+  }
+  if (msg->signal_count)
+    fprintf(
+        c,
+        "\tint r = 0;\n");  // fprintf(c, "\tdouble scaled;\n\tint r = 0;\n");
+  else
+    fprintf(c, "\tUNUSED(o);\n\tUNUSED(buf);\n");
+
+  fprintf(c, "\tdouble f;uint8_t i;uint16_t s;uint32_t l;uint64_t ll;\n\n");
+  fprintf(c, "\tr += snprintf(buf, bufSize, \"{ \");\n\n");
+
+  for (size_t i = 0; i < msg->signal_count; i++) {
+    if (signal2print_delta_json(msg->sigs[i], msg->id, name, c,
+                                (i < msg->signal_count - 1)) < 0)
+      return -1;
+  }
+  fprintf(c, "\tr += snprintf(buf+r, bufSize-r, \" }\\n\");\n");
+  if (msg->signal_count)
+    fprintf(c, "\treturn r;\n}\n\n");
+  else
+    fprintf(c, "\treturn 0;\n}\n\n");
+  return 0;
+}
+
+
 static int msg_dlc_check(can_msg_t *msg) {
 	assert(msg);
 	const unsigned bits = msg->dlc * 8;
@@ -856,6 +954,9 @@ static int msg2c(can_msg_t *msg, FILE *c, dbc2js_options_t *copts, char *god)
 
 	if (copts->generate_print && msg_print_json(msg, c, name, god, copts) < 0)
 		return -1;
+
+  if (copts->generate_print && msg_print_delta_json(msg, c, name, god, copts) < 0)
+    return -1;
 
 	return 0;
 }
@@ -981,6 +1082,42 @@ static int switch_function_print(FILE *c, dbc_t *dbc, bool prototype, const char
 	}
 	fprintf(c, "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return -1; break; \n\t}\n");
 	return fprintf(c, "\treturn -1; \n}\n\n");
+}
+
+static int switch_function_print_delta(FILE *c, dbc_t *dbc, bool prototype,
+                                       const char *god,
+                                       dbc2js_options_t *copts) {
+  assert(c);
+  assert(dbc);
+  assert(god);
+  assert(copts);
+  fprintf(c,
+          "int print_delta_message(const can_obj_%s_t *o, const can_obj_%s_t "
+          "*old, const unsigned long id, char* buf, int bufSize )",
+          god, god);
+  if (prototype) return fprintf(c, ";\n");
+  fprintf(c, " {\n");
+  if (copts->generate_asserts) {
+    fprintf(c, "\tassert(o);\n");
+    fprintf(c, "\tassert(old);\n");
+    fprintf(c,
+            "\tassert(id < (1ul << 29)); /* 29-bit CAN ID is largest possible "
+            "*/\n");
+    fprintf(c, "\tassert(buf);\n");
+  }
+
+  fprintf(c, "\tswitch (id) {\n");
+  for (size_t i = 0; i < dbc->message_count; i++) {
+    can_msg_t *msg = dbc->messages[i];
+    char name[MAX_NAME_LENGTH] = {0};
+    make_name(name, MAX_NAME_LENGTH, msg->name, msg->id);
+    fprintf(c, "\tcase 0x%03lx: return print_delta_%s(o, old, buf, bufSize);\n",
+            msg->id, name);
+  }
+  fprintf(c,
+          "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return "
+          "-1; break; \n\t}\n");
+  return fprintf(c, "\treturn -1; \n}\n\n");
 }
 
 static int msg2h_types_json(dbc_t *dbc, FILE *h) 
@@ -1148,9 +1285,11 @@ int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *cop
 	if (copts->generate_pack)
 		switch_function(h, dbc, "pack", false, true, "uint64_t", false, god, copts);
 
-	if (copts->generate_print)
+	if (copts->generate_print) {
 		switch_function_print(h, dbc, true, god, copts);
 
+		switch_function_print_delta(h, dbc, true, god, copts);
+	}
 	fputs("\n", h);
 
 	for (size_t i = 0; i < dbc->message_count; i++)
@@ -1196,9 +1335,11 @@ int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *cop
 	if (copts->generate_pack)
 		switch_function(c, dbc, "pack", false, false, "uint64_t", false, god, copts);
 
-	if (copts->generate_print)
+	if (copts->generate_print) {
 		switch_function_print(c, dbc, false, god, copts);
 
+		switch_function_print_delta(c, dbc, false, god, copts);
+	}
 fail:
 	free(file_guard);
 	free(god);

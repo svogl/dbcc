@@ -243,6 +243,7 @@ static int signal2serializer(signal_t *sig, const char *msg_name, FILE *o, const
 	fprintf(o, "%s%c |= x;\n", indent, motorola ? 'm' : 'i');
 	return 0;
 }
+
 static int signal2print_json(signal_t *sig, unsigned id, const char *msg_name, FILE *o, int add_comma)
 {
 	char comma[] = ",";
@@ -286,6 +287,46 @@ static int signal2print_json(signal_t *sig, unsigned id, const char *msg_name, F
 	/*fprintf(o, "\tif (r < 0)\n\t\treturn r;");*/
 }
 
+static int signal2print_json_cond(int idx, signal_t *sig, unsigned id, const char *msg_name, FILE *o)
+{
+	// n.b. comma or not is handled in the generated code as this needs to be determined at runtime.
+	/* generated code block looks like:
+		if (mi[0]->enabled) {
+		decode_can_0x6b9_CCU_BT_Status(o, &i);
+		r += snprintf(buf+r, bufSize-r, "\"%c CCU_BT_Status\":%d,", comma, i );
+		comma = ',';
+	}
+	*/
+	int n=0;
+	n+=fprintf(o,"\tif (mi[%d]->enabled) {\n", idx);
+
+	if (sig->scaling != 1.0 || sig->offset != 0.0)
+		sig->is_floating = true;
+
+	if (sig->is_floating) {
+		n+=fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name, msg_name, sig->name);
+		// return fprintf(o, "\"XXXX_%s\":\"%s.%s\" ", sig->name, msg_name, sig->name);
+		n+=fprintf(o, "\t\tr += snprintf(buf+r, bufSize-r,  \"%%c \\\"%s\\\":%%g%s\", comma, f);\n", sig->name );
+	} else {
+		if (sig->bit_length <= 8) {
+			n+=fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &i);\n", id, sig->name, msg_name);
+			 n+=fprintf(o, "\t\tr += snprintf(buf+r, bufSize-r, \"%%c \\\"%s\\\":%%d%s\", comma, i );\n", sig->name );
+	}	else if (sig->bit_length<= 16) {
+			n+=fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &s);\n", id, sig->name, msg_name);
+			 n+=fprintf(o, "\t\tr += snprintf(buf+r, bufSize-r,  \"%%c \\\"%s\\\":%%d%s\", comma, s );\n", sig->name );
+	}	else if (sig->bit_length<= 32) {
+			n+=fprintf(o, "\tdecode_can_0x%3x_%s(o, &l);\n", id, sig->name, msg_name);
+			 n+=fprintf(o, "\t\tr += snprintf(buf+r, bufSize-r, \"%%c \\\"%s\\\":%%d%s\", comma, l);\n", sig->name );
+		} else {
+			n+=fprintf(o, "\tdecode_can_0x%3x_%s(o, &ll);\n", id, sig->name, msg_name);
+			 n+=fprintf(o, "\t\tr += snprintf(buf+r, bufSize-r, \"%%c \\\"%s\\\":%%lld%s\", comma, ll);\n", sig->name );
+		}
+	}
+	n+=fprintf(o,"\t\tcomma=',';\n");
+	n+=fprintf(o,"\t}\n");
+	return n;
+}
+
 static int signal2print_delta_json(signal_t *sig, unsigned id,
                                    const char *msg_name, FILE *o,
                                    int add_comma) {
@@ -296,18 +337,15 @@ static int signal2print_delta_json(signal_t *sig, unsigned id,
 
   if (sig->scaling != 1.0 || sig->offset != 0.0) sig->is_floating = true;
 
-	fprintf(o, "\tif ( o->%s.%s != old->%s.%s)) {\n", 
-					sig->name, msg_name, 
-					sig->name, msg_name);
+	fprintf(o, "\tif ( o->%s.%s != old->%s.%s ) {\n", 
+					 msg_name, sig->name, 
+					 msg_name, sig->name);
 
   if (sig->is_floating) {
-    fprintf(o, "\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name, msg_name,
+    fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name, msg_name,
             sig->name);
-    // return fprintf(o, "\"XXXX_%s\":\"%s.%s\" ", sig->name, msg_name,
-    // sig->name);
-
     return fprintf(
-        o, "\tr += snprintf(buf+r, bufSize-r,  \"\\\"%s\\\":%%g%s\", f);\n",
+        o, "\tr += snprintf(buf+r, bufSize-r,  \"\\\"%s\\\":%%g%s\", f);\n\t}\n",
         sig->name, comma);
   } else {
     if (sig->bit_length <= 8) {
@@ -363,6 +401,7 @@ static int signal2print(signal_t *sig, unsigned id, const char *msg_name, FILE *
 			sig->name, sig->name);
 	/*fprintf(o, "\tif (r < 0)\n\t\treturn r;");*/
 }
+
 static int signal2type(signal_t *sig, FILE *o)
 {
 	assert(sig);
@@ -895,6 +934,46 @@ static int msg_print_delta_json(can_msg_t *msg, FILE *c, const char *name,
   return 0;
 }
 
+/** print a message formatted as a JSON object
+ * 
+ */
+static int msg_print_cond_json(can_msg_t *msg, FILE *c, const char *name, const char *god, dbc2js_options_t *copts)
+{
+	assert(msg);
+	assert(c);
+	assert(name);
+	assert(god);
+	assert(copts);
+	fprintf(c, "int conditional_print_%s(const can_obj_%s_t *o, char *buf, int bufSize) {\n", name, god);
+	if (copts->generate_asserts) {
+		fputs("\tassert(o);\n", c);
+		fputs("\tassert(buf);\n", c);
+		fprintf(c, "\tint chanId = 0x%x;\n", msg->id);
+		fprintf(c, "\tstruct meta_message_info** mi = find_message_info(chanId);\n", msg->id);
+		fputs("\tassert(mi);\n", c);
+		/* you may note the UNUSED macro may be generated, we should
+		 * still assert we are passed the correct things */
+	}
+	if (msg->signal_count)
+		fprintf(c, "\tint r = 0;\n"); //fprintf(c, "\tdouble scaled;\n\tint r = 0;\n");
+	else
+		fprintf(c, "\tUNUSED(o);\n\tUNUSED(buf);\n");
+
+	fprintf(c, "\tdouble f; uint8_t i; uint16_t s; uint32_t l; uint64_t ll;\n");
+	fprintf(c, "\tchar comma=' ';\n\n");
+	fprintf(c, "\tr += snprintf(buf, bufSize, \"{ \");\n");
+
+	for (size_t i = 0; i < msg->signal_count; i++) {
+		if (signal2print_json_cond(i, msg->sigs[i], msg->id, name, c ) < 0)
+			return -1;
+	}
+	fprintf(c, "\tr += snprintf(buf+r, bufSize-r, \" }\\n\");\n");
+	if (msg->signal_count)
+		fprintf(c, "\treturn r;\n}\n\n");
+	else
+		fprintf(c, "\treturn 0;\n}\n\n");
+	return 0;
+}
 
 static int msg_dlc_check(can_msg_t *msg) {
 	assert(msg);
@@ -956,6 +1035,9 @@ static int msg2c(can_msg_t *msg, FILE *c, dbc2js_options_t *copts, char *god)
 		return -1;
 
   if (copts->generate_print && msg_print_delta_json(msg, c, name, god, copts) < 0)
+    return -1;
+
+  if (copts->generate_print && msg_print_cond_json(msg, c, name, god, copts) < 0)
     return -1;
 
 	return 0;
@@ -1120,6 +1202,37 @@ static int switch_function_print_delta(FILE *c, dbc_t *dbc, bool prototype,
   return fprintf(c, "\treturn -1; \n}\n\n");
 }
 
+
+static int switch_function_conditional_print(FILE *c, dbc_t *dbc, bool prototype, const char *god, dbc2js_options_t *copts)
+{
+	assert(c);
+	assert(dbc);
+	assert(god);
+	assert(copts);
+	fprintf(c, "int print_message_conditional(const can_obj_%s_t *o, const unsigned long id, char* buf, int bufSize )", god);
+	if (prototype)
+		return fprintf(c, ";\n");
+	fprintf(c, " {\n");
+	if (copts->generate_asserts) {
+		fprintf(c, "\tassert(o);\n");
+		fprintf(c, "\tassert(id < (1ul << 29)); /* 29-bit CAN ID is largest possible */\n");
+		fprintf(c, "\tassert(buf);\n");
+	}
+	fprintf(c, "\tstruct meta_channel_info* chan = find_channel_info(id);\n");
+	fprintf(c, "\tif (!chan->enabled)\n\t\treturn 0;\n\n");
+
+	fprintf(c, "\tswitch (id) {\n");
+	for (size_t i = 0; i < dbc->message_count; i++) {
+		can_msg_t *msg = dbc->messages[i];
+		char name[MAX_NAME_LENGTH] = {0};
+		make_name(name, MAX_NAME_LENGTH, msg->name, msg->id);
+		fprintf(c, "\tcase 0x%03lx: return conditional_print_%s(o, buf, bufSize);\n", msg->id, name);
+	}
+	fprintf(c, "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return -1; break; \n\t}\n");
+	return fprintf(c, "\treturn -1; \n}\n\n");
+}
+
+
 static int msg2h_types_json(dbc_t *dbc, FILE *h) 
 {
 	assert(h);
@@ -1196,6 +1309,244 @@ fail:
 	free(object_name);
 	return NULL;
 }
+
+
+
+
+/********** GENERATE META DATA 
+*/
+static void make_meta_name(char *newname, size_t maxlen, const char *name, unsigned id)
+{
+	assert(newname);
+	assert(name);
+	snprintf(newname, maxlen-1, "meta_0x%03x_%s", id, name);
+}
+
+static int meta_signal2type(char *thetype, size_t maxlen, signal_t *sig)
+{
+	assert(sig);
+	assert(thetype);
+	const unsigned length = sig->bit_length;
+	const char *type = determine_type(length, sig->is_signed);
+
+	if (length == 0) {
+		warning("signal %s has bit length of 0 (fix the dbc file)");
+		return -1;
+	}
+
+	if (sig->is_floating) {
+		if (length != 32 && length != 64) {
+			warning("signal %s is floating point number but has length %u (fix the dbc file)", sig->name, length);
+			return -1;
+		}
+		type = length == 64 ? "double" : "float";
+	} else {
+		if (sig->bit_length == 1) {
+			type = "bool";
+		}
+	}
+
+	return snprintf(thetype, maxlen, "%s", type);
+}
+
+static int switch_function_print_meta_header(FILE *h, dbc_t *dbc, bool prototype, const char *god, dbc2js_options_t *copts)
+{
+	assert(h);
+	assert(dbc);
+	assert(god);
+	assert(copts);
+
+	fprintf(h, "#ifndef META_INFO\n");
+	fprintf(h, "#define META_INFO\n");
+
+	fprintf(h, "struct meta_message_info;   /* forward decl */\n\n");
+	fprintf(h, 
+	"struct meta_channel_info {\n"
+	"   int id;\n"
+	"   char name[%d];\n"
+	"   int enabled; /* used by decode2json */\n"
+	"};\n\n", MAX_NAME_LENGTH);
+
+	fprintf(h, "/** number of channels */\n");
+	fprintf(h, "extern unsigned int meta_channel_count;\n\n");
+
+	fprintf(h, "/** channel list; the last entry has id==0 */\n"); 
+	fprintf(h, "extern struct meta_channel_info meta_channels[];\n\n");
+
+	fprintf(h, 
+	"struct meta_message_info {\n"
+	"   int id;\n"
+	"   char name[%d];\n"
+	"   char units[%d];\n"
+	"   char type[%d];\n"
+	"   double min;\n"
+	"   double max;\n"
+	"   int enabled; /* used by decode2json */\n"
+	"};\n\n", MAX_NAME_LENGTH, 32, 16);
+
+	fprintf(h, "// per-message type meta-data list; indexed by the position in the channel list\n");
+	fprintf(h, "extern struct meta_message_info* meta_message_infos[];\n\n");
+	fprintf(h, "extern struct meta_channel_info* find_channel_info(int channelid);\n");
+	fprintf(h, "extern struct meta_message_info** find_message_info(int channelid);\n\n");
+	fprintf(h, "extern int enable_channel(int channelid);\n");
+	fprintf(h, "extern int disable_channel(int channelid);\n");
+
+	fprintf(h, "// enable/disable a signal for printing; pass the channel id and signal name (string match)\n");
+	fprintf(h, "// returns -1 if not found, 0 on success\n");
+	fprintf(h, "extern int enable_signal(int channelid, const char* signalname);\n");
+	fprintf(h, "extern int disable_signal(int channelid, const char* signalname);\n");
+
+	fprintf(h, "\n#endif /*META_INFO*/\n\n");
+	return 1;
+}
+
+static char* meta_funcs = 
+"\n"
+"struct meta_channel_info* find_channel_info(int channelid)\n"
+"{\n"
+"	for (size_t i=0 ; i<meta_channel_count; i++) {\n"
+"    if ( ! meta_channels[i].id ) {\n"
+"      return NULL; // not found\n"
+"    }\n"
+"    if ( channelid == meta_channels[i].id ) {\n"
+"      return &meta_channels[i];\n"
+"    }\n"
+"	}\n"
+"}\n\n"
+"struct meta_message_info** find_message_info(int channelid)\n"
+"{\n"
+"	for (size_t i=0 ; i<meta_channel_count; i++) {\n"
+"    if ( ! meta_channels[i].id ) {\n"
+"      return NULL; // not found\n"
+"    }\n"
+"    if ( channelid == meta_channels[i].id ) {\n"
+"      return meta_message_infos[i];\n" 																// this array points to an array of values!
+"    }\n"
+"	}\n"
+"}\n\n"
+"\nstatic int disenable_signal_channel(int idx, struct meta_channel_info* chan, const char* signalname, int enable)\n"
+"{\n"
+"  struct meta_message_info* mi = meta_message_infos[idx];\n"
+"  for (size_t i=0 ; mi->id >=0; i++) {\n"
+"    if ( ! meta_channels[i].id ) {\n"
+"      return -1; // not found\n"
+"    }\n"
+"    if (strcmp(signalname, mi->name) == 0) {\n"
+"      mi->enabled = enable;\n"
+"      return 0;\n"
+"    }\n"
+"  }\n"
+"  if (mi->id == -1) {\n"
+"    fprintf(stderr, \"enable_signal_channel: did not find %s :: %s\\n\", chan->name, signalname);\n"
+"    return -1; // not found\n"
+"  }\n"
+"}\n"
+"\n"
+"static int disenable_signal(int channelid, const char* signalname, int enable)\n"
+"{\n"
+"	for (size_t i=0 ; i<meta_channel_count; i++) {\n"
+"    if ( ! meta_channels[i].id ) {\n"
+"      return -1; // not found\n"
+"    }\n"
+"    if ( channelid == meta_channels[i].id ) {\n"
+"      return disenable_signal_channel(i, &meta_channels[i], signalname, enable);\n"
+"    }\n"
+" }\n"
+"}\n"
+"\n"
+"int enable_signal(int channelid, const char* signalname)\n"
+"{\n"
+"    return disenable_signal(channelid, signalname, 1);\n"
+"}\n"
+"\n"
+"int disable_signal(int channelid, const char* signalname)\n"
+"{\n"
+"    return disenable_signal(channelid, signalname, 0);\n"
+"}\n\n";
+
+static int print_message_meta(FILE *c, dbc_t *dbc, dbc2js_options_t *copts, can_msg_t *msg)
+{
+	assert(c);
+	assert(dbc);
+	assert(msg);
+
+	char msg_name[MAX_NAME_LENGTH] = {0};
+	make_meta_name(msg_name, MAX_NAME_LENGTH, msg->name, msg->id);
+
+	fprintf(c, "struct meta_message_info %s[] = {\n", msg_name);	
+	for (size_t i = 0 ; i < msg->signal_count ; i++) {	
+
+		signal_t* sig = msg->sigs[i];
+		char thetype[MAX_NAME_LENGTH];
+
+		meta_signal2type(thetype, MAX_NAME_LENGTH, sig);
+
+		fprintf(c, "{ .id=%d  \t", i );	
+		fprintf(c, "    , .name=\"%s\"\t", sig->name);	
+		fprintf(c, "    , .units=\"%s\"\t", sig->units);	
+		fprintf(c, "    , .type=\"%s\"\t", thetype);	
+//		if (sig->minimum)
+			fprintf(c, "    , .min=%g\t", sig->minimum);	
+		if (sig->maximum)
+			fprintf(c, "    , .max=%g\t", sig->maximum);	
+		if (sig->comment) {
+			fprintf(c, "    , .comment=\"%s\"\t", sig->comment);	
+		}
+		fprintf(c, "},\n", i );	
+	}	 
+	fprintf(c, "{ .id = -1 }\n" );	
+	fprintf(c, "};\n\n", msg_name);	
+}
+
+
+static int switch_function_print_meta(FILE *c, dbc_t *dbc, bool prototype, const char *god, dbc2js_options_t *copts)
+{
+	assert(c);
+	assert(dbc);
+	assert(god);
+	assert(copts);
+
+	fprintf(c, "struct meta_channel_info meta_channels[] = {\n");
+	for (size_t i = 0; i < dbc->message_count; i++) {
+		can_msg_t *msg = dbc->messages[i];
+		char name[MAX_NAME_LENGTH] = {0};
+		make_name(name, MAX_NAME_LENGTH, msg->name, msg->id);
+		if (msg->comment) {
+			fprintf(c, "\t{ /* %4d */  .id=0x%03lx, .name=\"%s\", .enabled=0 },  /* %s */\n", msg->id, msg->id, msg->name, msg->comment);
+		} else {
+			fprintf(c, "\t{ /* %4d */  .id=0x%03lx, .name=\"%s\", .enabled=0 },\n", msg->id, msg->id, msg->name);
+		}
+	}
+	fprintf(c, "\t{.id=0}\n};\n\n");
+
+	fprintf(c, "/** number of channels */\n");
+	fprintf(c, "unsigned int meta_channel_count = %d;\n", dbc->message_count);
+
+	// now print meta for every message type:
+	for (size_t i = 0; i < dbc->message_count; i++) {
+		print_message_meta(c, dbc, copts, dbc->messages[i]);
+	}
+
+	// then: lookup table for the messages:
+
+	fprintf(c, "// array to the message metadata structs:\n");
+	fprintf(c, "struct meta_message_info* meta_message_infos[] = {\n");
+	for (size_t i = 0; i < dbc->message_count; i++) {
+		can_msg_t *msg = dbc->messages[i];
+		char name[MAX_NAME_LENGTH] = {0};
+		make_meta_name(name, MAX_NAME_LENGTH, msg->name, msg->id);
+
+		fprintf(c, "\t%s,\n", name);
+	}
+	fprintf(c, "\tNULL\n};\n\n");
+
+
+	fprintf(c, "// ACCESS FUNCTIONS\n");
+	fprintf(c, "%s", meta_funcs);
+
+	return 1;
+}
+
 
 int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *copts)
 {
@@ -1289,12 +1640,17 @@ int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *cop
 		switch_function_print(h, dbc, true, god, copts);
 
 		switch_function_print_delta(h, dbc, true, god, copts);
+
+		switch_function_conditional_print(h, dbc, true, god, copts);
 	}
 	fputs("\n", h);
 
 	for (size_t i = 0; i < dbc->message_count; i++)
 		if (msg2h(dbc->messages[i], h, copts, god) < 0)
 			return -1;
+
+
+	switch_function_print_meta_header(h, dbc, false, god, copts);
 
 	fputs(
 		"#ifdef __cplusplus\n"
@@ -1306,6 +1662,7 @@ int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *cop
 
 	/* C FILE */
 	fputs("/* Generated by DBCC, see <https://github.com/howerj/dbcc> */\n", c);
+	fputs("/*    ... but forked by svogl, see <https://github.com/voxel-dot-at/dbcc> */\n", c);
 	fprintf(c, "#include \"%s\"\n", name);
 	fprintf(c, "#include <inttypes.h>\n");
 	if (dbc->use_float)
@@ -1314,6 +1671,7 @@ int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *cop
 		fprintf(c, "#include <assert.h>\n");
 	fputc('\n', c);
 	fprintf(c, "#define UNUSED(X) ((void)(X))\n\n");
+	fprintf(c, "#include <string.h>\n"); // for the meta-ops
 	fputs(cfunctions, c);
 	if (copts->generate_print)
 		fputs(cfunctions_print_only, c);
@@ -1339,7 +1697,12 @@ int dbc2js(dbc_t *dbc, FILE *c, FILE *h, const char *name, dbc2js_options_t *cop
 		switch_function_print(c, dbc, false, god, copts);
 
 		switch_function_print_delta(c, dbc, false, god, copts);
+
+		switch_function_conditional_print(c, dbc, false, god, copts);
 	}
+
+	switch_function_print_meta(c, dbc, false, god, copts);
+
 fail:
 	free(file_guard);
 	free(god);

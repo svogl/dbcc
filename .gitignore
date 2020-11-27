@@ -23,6 +23,7 @@ dbcc.VC.db
 
 Release/
 
+.vscode
 
 # QtCreator project files
 *.pro.user

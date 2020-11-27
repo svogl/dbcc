@@ -105,7 +105,7 @@ static int dbc2jsWrapper(dbc_t *dbc, const char *dbc_file, const char *file_only
 	char *cname = replace_file_type(dbc_file,  "js.c");
 	char *hname = replace_file_type(dbc_file,  "js.h");
 	char *jname = replace_file_type(dbc_file,  "js");
-	char *fname = replace_file_type(file_only, "h");
+	char *fname = replace_file_type(file_only, "js.h");
 	FILE *c = fopen_or_die(cname, "wb");
 	FILE *h = fopen_or_die(hname, "wb");
 	// FILE *js = fopen_or_die(jname, "wb");

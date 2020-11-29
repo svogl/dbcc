@@ -1222,7 +1222,7 @@ static int switch_function_print(FILE *c, dbc_t *dbc, bool prototype,
             name);
   }
   fprintf(c,
-          "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return "
+          "\tdefault: snprintf(buf, bufSize, \"nop: %%03lx\\n\", id); return "
           "-1; break; \n\t}\n");
   return fprintf(c, "\treturn -1; \n}\n\n");
 }
@@ -1258,7 +1258,7 @@ static int switch_function_print_delta(FILE *c, dbc_t *dbc, bool prototype,
             msg->id, name);
   }
   fprintf(c,
-          "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return "
+          "\tdefault: snprintf(buf, bufSize, \"nop: %%03lx\\n\", id); return "
           "-1; break; \n\t}\n");
   return fprintf(c, "\treturn -1; \n}\n\n");
 }
@@ -1284,6 +1284,10 @@ static int switch_function_conditional_print(FILE *c, dbc_t *dbc,
     fprintf(c, "\tassert(buf);\n");
   }
   fprintf(c, "\tstruct meta_channel_info* chan = find_channel_info(id);\n");
+  fprintf(c, "\tif (!chan) {\n");
+  fprintf(c, "\t\tprintf(\"unknown channel id %%lu - check your dbc!\", id);\n");
+  fprintf(c, "\t\treturn -1;\n");
+  fprintf(c, "\t}\n\n");
   fprintf(c, "\tif (!chan->enabled)\n\t\treturn 0;\n\n");
 
   fprintf(c, "\tswitch (id) {\n");
@@ -1296,7 +1300,7 @@ static int switch_function_conditional_print(FILE *c, dbc_t *dbc,
             msg->id, name);
   }
   fprintf(c,
-          "\tdefault: snprintf(buf, bufSize, \"nop: %%03x\\n\", id); return "
+          "\tdefault: snprintf(buf, bufSize, \"nop: %%03lx\\n\", id); return "
           "-1; break; \n\t}\n");
   return fprintf(c, "\treturn -1; \n}\n\n");
 }
@@ -1505,6 +1509,7 @@ static int switch_function_print_meta_header(FILE *h, dbc_t *dbc,
           "struct _filter_data {\n"
           "  struct _filter_data* next; \n"
           "  filter_func func;\n"
+          "  char name[32];\n"
           "};\n"
           "typedef struct _filter_data filter_data;\n"
           "\n"
@@ -1604,40 +1609,17 @@ static char *meta_funcs =
     "  return NULL;\n"
     "}\n"
     "\n"
-    "\nstatic int disenable_signal_channel(int idx, struct meta_channel_info* "
-    "chan, const char* signalname, int enable)\n"
-    "{\n"
-    "  struct meta_signal_info* mi = meta_signal_infos[idx];\n"
-    "  for (size_t i=0 ; mi->id >=0; i++) {\n"
-    "    if ( ! meta_channels[i].id ) {\n"
-    "      return -1; // not found\n"
-    "    }\n"
-    "    printf(\"disen %%s %%s\", signalname, mi->name);\n"
-    "    if (strcmp(signalname, mi->name) == 0) {\n"
-    "      mi->enabled = enable;\n"
-    "      return 0;\n"
-    "    }\n"
-    "  }\n"
-    "  if (mi->id == -1) {\n"
-    "    fprintf(stderr, \"enable_signal_channel: did not find %s :: %s\\n\", "
-    "chan->name, signalname);\n"
-    "    return -1; // not found\n"
-    "  }\n"
-    "}\n"
-    "\n"
     "static int disenable_signal(int channelid, const char* signalname, int "
     "enable)\n"
     "{\n"
-    "	for (size_t i=0 ; i<meta_channel_count; i++) {\n"
-    "    if ( ! meta_channels[i].id ) {\n"
-    "      return -1; // not found\n"
-    "    }\n"
-    "    if ( channelid == meta_channels[i].id ) {\n"
-    "      return disenable_signal_channel(i, &meta_channels[i], signalname, "
-    "enable);\n"
-    "    }\n"
-    "  }\n"
-    "  return -1;\n"
+    "	struct meta_signal_info* mi = find_signal_info(channelid, "
+    "signalname);\n"
+    "	if (!mi) {\n"
+    "		printf(\" did not find 0x%x %s\\n\", channelid, signalname);\n"
+    "		return -1;\n"
+    "	}\n"
+    "	mi->enabled = enable;\n"
+    "	return 0;\n"
     "}\n"
     "\n"
     "int enable_signal(int channelid, const char* signalname)\n"

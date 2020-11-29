@@ -294,53 +294,30 @@ static int signal2print_json(signal_t *sig, unsigned id, const char *msg_name,
 static int signal2print_json_cond(int idx, signal_t *sig, unsigned id,
                                   const char *msg_name, FILE *o) {
   int n = 0;
-  n += fprintf(o, "\tif (mi[%d]->enabled) {\n", idx);
+  n += fprintf(o, "\tif (mi[%d].enabled) {\n", idx);
 
   if (sig->scaling != 1.0 || sig->offset != 0.0) sig->is_floating = true;
 
   if (sig->is_floating) {
     n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name,
                  msg_name, sig->name);
-    // return fprintf(o, "\"XXXX_%s\":\"%s.%s\" ", sig->name, msg_name,
-    // sig->name);
-    n += fprintf(o,
-                 "\t\tr += snprintf(buf+r, bufSize-r,  \"%%c "
-                 "\\\"%s\\\":%%g%s\", comma, f);\n",
-                 sig->name);
   } else {
     if (sig->bit_length <= 8) {
       n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &i);\n", id, sig->name,
                    msg_name);
-      n += fprintf(o,
-                   "\t\tr += snprintf(buf+r, bufSize-r, \"%%c "
-                   "\\\"%s\\\":%%d%s\", comma, i );\n",
-                   sig->name);
     } else if (sig->bit_length <= 16) {
       n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &s);\n", id, sig->name,
                    msg_name);
-      n += fprintf(o,
-                   "\t\tr += snprintf(buf+r, bufSize-r,  \"%%c "
-                   "\\\"%s\\\":%%d%s\", comma, s );\n",
-                   sig->name);
     } else if (sig->bit_length <= 32) {
       n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &l);\n", id, sig->name,
                    msg_name);
-      n += fprintf(o,
-                   "\t\tr += snprintf(buf+r, bufSize-r, \"%%c "
-                   "\\\"%s\\\":%%d%s\", comma, l);\n",
-                   sig->name);
     } else {
-      n += fprintf(o, "\tdecode_can_0x%3x_%s(o, &ll);\n", id, sig->name,
+      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &ll);\n", id, sig->name,
                    msg_name);
-      n += fprintf(o,
-                   "\t\tr += snprintf(buf+r, bufSize-r, \"%%c "
-                   "\\\"%s\\\":%%lld%s\", comma, ll);\n",
-                   sig->name);
     }
   }
-  n += fprintf(o, "\t\tcomma=',';\n");
-  n += fprintf(o, "\t\tif (mi[%d]->filter && mi[%d]->filter->func) {\n", idx, idx);
-  n += fprintf(o, "\t\t\tmi[%d]->filter->func(NULL, mi[%d], mi[%d]->filter, val);\n", idx, idx, idx);
+  n += fprintf(o, "\t\tif (mi[%d].filter && mi[%d].filter->func) {\n", idx, idx);
+  n += fprintf(o, "\t\t\tmi[%d].filter->func(chan, &mi[%d], mi[%d].filter, val);\n", idx, idx, idx);
   n += fprintf(o, "\t\t}\n");
   n += fprintf(o, "\t}\n");
   return n;
@@ -982,14 +959,14 @@ static int msg_print_cond_json(can_msg_t *msg, FILE *c, const char *name,
   assert(god);
   assert(copts);
   fprintf(c,
-          "int conditional_print_%s(const can_obj_%s_t *o, char *buf, int "
+          "int conditional_print_%s(struct meta_channel_info* chan, const can_obj_%s_t *o, char *buf, int "
           "bufSize) {\n",
           name, god);
   if (copts->generate_asserts) {
     fputs("\tassert(o);\n", c);
     fputs("\tassert(buf);\n", c);
     fprintf(c, "\tint chanId = 0x%x;\n", msg->id);
-    fprintf(c, "\tstruct meta_signal_info** mi = find_signal_infos(chanId);\n",
+    fprintf(c, "\tstruct meta_signal_info* mi = find_signal_infos(chanId);\n",
             msg->id);
     fputs("\tassert(mi);\n", c);
     /* you may note the UNUSED macro may be generated, we should
@@ -1003,15 +980,12 @@ static int msg_print_cond_json(can_msg_t *msg, FILE *c, const char *name,
     fprintf(c, "\tUNUSED(o);\n\tUNUSED(buf);\n");
 
   fprintf(c, "\tdouble f; uint8_t i; uint16_t s; uint32_t l; uint64_t ll;\n");
-  fprintf(c, "\tvalue_type val;\n");
-  fprintf(c, "\tchar comma=' ';\n\n");
-  fprintf(c, "\tr += snprintf(buf, bufSize, \"{ \");\n");
+  fprintf(c, "\tvalue_type val;\n\n");
 
   for (size_t i = 0; i < msg->signal_count; i++) {
     if (signal2print_json_cond(i, msg->sigs[i], msg->id, name, c) < 0)
       return -1;
   }
-  fprintf(c, "\tr += snprintf(buf+r, bufSize-r, \" }\\n\");\n");
   if (msg->signal_count)
     fprintf(c, "\treturn r;\n}\n\n");
   else
@@ -1296,7 +1270,7 @@ static int switch_function_conditional_print(FILE *c, dbc_t *dbc,
     char name[MAX_NAME_LENGTH] = {0};
     make_name(name, MAX_NAME_LENGTH, msg->name, msg->id);
     fprintf(c,
-            "\tcase 0x%03lx: return conditional_print_%s(o, buf, bufSize);\n",
+            "\tcase 0x%03lx: return conditional_print_%s(chan, o, buf, bufSize);\n",
             msg->id, name);
   }
   fprintf(c,
@@ -1536,7 +1510,7 @@ static int switch_function_print_meta_header(FILE *h, dbc_t *dbc,
       h,
       "extern struct meta_channel_info* find_channel_info(int channelid);\n");
   fprintf(h,
-          "extern struct meta_signal_info** find_signal_infos(int "
+          "extern struct meta_signal_info* find_signal_infos(int "
           "channelid);\n\n");
   fprintf(h, "extern int enable_channel(int channelid);\n");
   fprintf(h, "extern int disable_channel(int channelid);\n");
@@ -1582,13 +1556,13 @@ static char *meta_funcs =
     "	}\n"
     "}\n"
     "\n"
-    "struct meta_signal_info** find_signal_infos(int channelid)\n"
+    "struct meta_signal_info* find_signal_infos(int channelid)\n"
     "{\n"
     "  int idx = find_channel_index(channelid);\n"
     "	 if (idx<0) {\n"
     "	   return NULL;\n"
     "	 } else {\n"
-    "    return(struct meta_signal_info**)meta_signal_infos[idx];\n"
+    "    return meta_signal_infos[idx];\n"
     "  }\n"
     "}\n"
     "\n"

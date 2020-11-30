@@ -302,18 +302,34 @@ static int signal2print_json_cond(int idx, signal_t *sig, unsigned id,
     n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.d);\n", id, sig->name,
                  msg_name, sig->name);
   } else {
-    if (sig->bit_length <= 8) {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u8);\n", id, sig->name,
-                   msg_name);
-    } else if (sig->bit_length <= 16) {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u16);\n", id, sig->name,
-                   msg_name);
-    } else if (sig->bit_length <= 32) {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u32);\n", id, sig->name,
-                   msg_name);
+    if (sig->is_signed) {
+      if (sig->bit_length <= 8) {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.i8);\n", id, sig->name,
+                     msg_name);
+      } else if (sig->bit_length <= 16) {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.i16);\n", id,
+                     sig->name, msg_name);
+      } else if (sig->bit_length <= 32) {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.i32);\n", id,
+                     sig->name, msg_name);
+      } else {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.i64);\n", id,
+                     sig->name, msg_name);
+      }
     } else {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u64);\n", id, sig->name,
-                   msg_name);
+      if (sig->bit_length <= 8) {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u8);\n", id, sig->name,
+                     msg_name);
+      } else if (sig->bit_length <= 16) {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u16);\n", id,
+                     sig->name, msg_name);
+      } else if (sig->bit_length <= 32) {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u32);\n", id,
+                     sig->name, msg_name);
+      } else {
+        n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u64);\n", id,
+                     sig->name, msg_name);
+      }
     }
   }
   n += fprintf(o, "\t\tif (mi[%d].filter && mi[%d].filter->func) {\n", idx, idx);

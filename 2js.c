@@ -299,20 +299,20 @@ static int signal2print_json_cond(int idx, signal_t *sig, unsigned id,
   if (sig->scaling != 1.0 || sig->offset != 0.0) sig->is_floating = true;
 
   if (sig->is_floating) {
-    n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &f);\n", id, sig->name,
+    n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.d);\n", id, sig->name,
                  msg_name, sig->name);
   } else {
     if (sig->bit_length <= 8) {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &i);\n", id, sig->name,
+      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u8);\n", id, sig->name,
                    msg_name);
     } else if (sig->bit_length <= 16) {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &s);\n", id, sig->name,
+      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u16);\n", id, sig->name,
                    msg_name);
     } else if (sig->bit_length <= 32) {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &l);\n", id, sig->name,
+      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u32);\n", id, sig->name,
                    msg_name);
     } else {
-      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &ll);\n", id, sig->name,
+      n += fprintf(o, "\t\tdecode_can_0x%3x_%s(o, &val.u64);\n", id, sig->name,
                    msg_name);
     }
   }
@@ -979,7 +979,6 @@ static int msg_print_cond_json(can_msg_t *msg, FILE *c, const char *name,
   else
     fprintf(c, "\tUNUSED(o);\n\tUNUSED(buf);\n");
 
-  fprintf(c, "\tdouble f; uint8_t i; uint16_t s; uint32_t l; uint64_t ll;\n");
   fprintf(c, "\tvalue_type val;\n\n");
 
   for (size_t i = 0; i < msg->signal_count; i++) {

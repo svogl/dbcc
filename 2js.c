@@ -1396,7 +1396,6 @@ static int meta_signal2type(char *thetype, size_t maxlen, signal_t *sig) {
       type = "bool";
     }
   }
-  printf("--meta2sig %s %d %s\n", sig->name, length, type);
   return snprintf(thetype, maxlen, "%s", type);
 }
 
@@ -1437,7 +1436,6 @@ static int meta_signal2Vtype(char *thetype, size_t maxlen, signal_t *sig) {
       if (length <= 8) type = "i8";
     }
   }
-  printf("--meta2Vsig %s %d %s\n", sig->name, length, type);
   return snprintf(thetype, maxlen, "%s", type);
 }
 

@@ -1387,15 +1387,16 @@ static int meta_signal2type(char *thetype, size_t maxlen, signal_t *sig) {
           "signal %s is floating point number but has length %u (fix the dbc "
           "file)",
           sig->name, length);
-      return -1;
+      //      return -1;
     }
-    type = length == 64 ? "double" : "float";
+    // type = length == 64 ? "double" : "float";
+    type = "double";
   } else {
     if (sig->bit_length == 1) {
       type = "bool";
     }
   }
-
+  printf("--meta2sig %s %d %s\n", sig->name, length, type);
   return snprintf(thetype, maxlen, "%s", type);
 }
 
@@ -1416,9 +1417,10 @@ static int meta_signal2Vtype(char *thetype, size_t maxlen, signal_t *sig) {
           "signal %s is floating point number but has length %u (fix the dbc "
           "file)",
           sig->name, length);
-      return -1;
+      // return -1;
     }
-    type = length == 64 ? "d" : "f";
+    // type = length == 64 ? "d" : "f";
+    type = "d";
   } else {
     if (sig->bit_length == 1) {
       type = "bit";
@@ -1435,6 +1437,7 @@ static int meta_signal2Vtype(char *thetype, size_t maxlen, signal_t *sig) {
       if (length <= 8) type = "i8";
     }
   }
+  printf("--meta2Vsig %s %d %s\n", sig->name, length, type);
   return snprintf(thetype, maxlen, "%s", type);
 }
 

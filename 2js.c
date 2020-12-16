@@ -295,7 +295,8 @@ static int signal2print_json_cond(int idx, signal_t *sig, unsigned id,
                                   const char *msg_name, FILE *o) {
   int n = 0;
   n += fprintf(o, "\tif (mi[%d].enabled) {\n", idx);
-
+  fprintf(o, "\t\tvalue_type val = { .u64 = 0l };\n");
+  
   if (sig->scaling != 1.0 || sig->offset != 0.0) sig->is_floating = true;
 
   if (sig->is_floating) {
@@ -995,7 +996,7 @@ static int msg_print_cond_json(can_msg_t *msg, FILE *c, const char *name,
   else
     fprintf(c, "\tUNUSED(o);\n\tUNUSED(buf);\n");
 
-  fprintf(c, "\tvalue_type val;\n\n");
+  //  fprintf(c, "\tvalue_type val;\n\n");
 
   for (size_t i = 0; i < msg->signal_count; i++) {
     if (signal2print_json_cond(i, msg->sigs[i], msg->id, name, c) < 0)
